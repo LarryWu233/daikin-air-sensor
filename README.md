@@ -1,12 +1,14 @@
 ## 大金空气传感器
 下图为BRY88AB151K版，其右上为甲醛扩展侧盖，向后滑动打开；不带甲醛字样的为BRY88AA151K版，不支持甲醛扩展
 
+> **本仓库新增的 OLED 配置、组件与固件全部基于 BRY88AB151K（AB 版）**，请勿与 BRY88AA151K（AA 版）混用：两版 PCB 引脚与外设不同，AA 版没有甲醛扩展侧盖，也不支持甲醛模块。
+
 <img src="https://raw.githubusercontent.com/louliangsheng/daikin-air-sensor/main/image/BRY88AB151K.jpg" width="300">
 
 ## 编译以及烧录
 1.按照参考链接[视频教程](https://www.bilibili.com/video/BV1PY4y1y7sE)进行拆解。
 
-2.根据需要将header文件夹中的pm2005.h、pm2105.h、cm1106.h放入ESPHome配置文件夹中，然后根据传感器选择相应的yaml文件编译固件，其中PM2.5传感器银色金属外壳是pm2005，黑色塑料外壳的是pm2105，若没有编译环境，可直接使用firmware文件夹中编译好的factory固件刷写。
+2.根据需要将header文件夹中的pm2005.h、pm2105.h、cm1106.h放入ESPHome配置文件夹中，然后根据传感器选择相应的yaml文件编译固件，其中PM2.5传感器银色金属外壳是pm2005，黑色塑料外壳的是pm2105（**这是早期批次的特征，后期批次请见下文「拆机辨认」一节**），若没有编译环境，可直接使用firmware文件夹中编译好的factory固件刷写。
 
 3.将Power&IIC排线插到PCB板上，BRY88AB151K版为短接图片中GPIO0两个针脚（其中一个为GND），短接后上电即可进入BOOT刷写模式，然后将图片中的RXD TXD GND连接到USB转TTL刷机板的TX RX GND上，USB插到电脑上，进入[WEB ESPHome](https://web.esphome.io/) 烧录固件；BRY88AA151K版刷机原理相同，需要短接GPIO0和GND进入BOOT后通过芯片U0 RXTX刷写；进入BOOT后PCB板上的LED灯不亮，若无法烧录可尝试对调RXD TXD针脚或一直短接GPIO0/GND并重新上电。
 
@@ -15,6 +17,18 @@
 4.刷写完成后重新上电，连接DAIKIN Fallback Hotspot热点进行配网，BRY88AB151K版可安装[甲醛模块BRY88HA111](https://mp.weixin.qq.com/s?search_click_id=7568137682827411716-1679579213259-0915290085&__biz=MzI2MTQ1Mzk5NA==&mid=2247507885&idx=1&sn=4e776305cd6160c879ebb7c7b14114b3&chksm=ea58be68dd2f377e69ff886ba1ef2e415e8a3beee49b2b690f129c9dc010533a1c179c52a617&scene=7&clicktime=1679579213&enterid=1679579213&subscene=0&ascene=65&devicetype=iOS16.3.1&version=18002225&nettype=WIFI&lang=zh_CN&countrycode=CN&fontScale=100&exportkey=n_ChQIAhIQqp9dEP%2FcvKNVHjT9MLSoURLbAQIE97dBBAEAAAAAALfEBAuiQiEAAAAOpnltbLcz9gKNyK89dVj0tP45T%2Fk5VwDaZiPSX7nxBsvQzJfAO87KKKXNywrNXQSAgmyxqgaAGN37ms8QtxnxcvyjU5Ec%2FVkE3UVETqpzCG7kW9sFuH2XkRVj5qAT06RIDakT%2BXpfhqK24j9zp3%2Bxuq2SrOr3gwBi3sqsPCcmRKwUZ3zEUPUGofxD%2B4HrNPWxEKcwCH48Rzs49u%2FqjaAQfOjcn9rVs2X2sWnFcLAP3%2BlwZONDO423YffTUZW4811HiZ755Q%3D%3D&pass_ticket=VG%2B%2FH3lCltnJWspHiUjdHQtR83Q%2BxCGYBd2vxTKXFSsgfMHaA28Ud%2BsfO15hWyOYtfamz1JiG7DhYWErlwaccA%3D%3D&wx_header=3)；配网完成后下载firmware/ota文件夹内设备对应固件进行升级，升级后需要重新配网；CO2传感器启动需要大概3分钟，启动期间数值为550ppm；在进行CO2校准时，请确保放入室外或此时CO2浓度足够低。
 
 <img src="https://mmbiz.qpic.cn/mmbiz_png/HhGBahfz4QZ6IMPibRCbowicxMjSgsZNiaCX7C6A6RgkyOuGIbDl0eCWA5cjsypn0RPjo7rjbAhqvtTxANthGQZmw/640?wx_fmt=png&wxfrom=5&wx_lazy=1&wx_co=1" width="450">
+
+## 拆机辨认：先确认批次，再选 YAML
+
+原作者 README 里写的「PM2.5 传感器银色金属外壳是 pm2005、黑色塑料外壳是 pm2105」，描述的是**早期批次**的机器，不能直接套用到所有机器：
+
+| 批次 | PM2.5 传感器外观 | 实测 CM1106 固件 | 建议配置 |
+|---|---|---|---|
+| 早期 | 银色金属外壳，或黑色塑料外壳（特征明显、易分辨） | 银壳机 `V1.06.3.00`（Bit0 反转）、黑壳机 `V5.06.3.02`（Bit0 正常） | 银壳用 `-pm2005-oled.yaml`，黑壳用 `-pm2105-oled.yaml` |
+| 后期 | **哑光银色**，表面带**厂家标识/丝印** | 以「读取 CM1106 版本」实测为准 | 按实测版本号选择（见下） |
+
+- 后期批次的 PM2.5 模块是哑光银色、带厂家标识，颜色与早期的亮银/黑色都不一样，**只看壳色会认错**，建议拆机后直接看模块本体上的厂家标识与丝印。
+- 最稳妥的确认方式：先刷任一版固件，在 Web 界面或 ESPHome 日志里点「读取 CM1106 版本」——`V1.0x` 系列用 `bit0_inverted: true`（`-pm2005-oled.yaml`），`V5.0x` 系列用 `false`（`-pm2105-oled.yaml`）；两版固件其余功能完全相同。
 
 ## CM1106 固件版本差异（实测）
 
@@ -54,7 +68,7 @@
 
 ## 2026 改造版源码与固件（OLED 显示）
 
-上面「改造说明」对应的完整源码、两份配置和编译好的固件都在本仓库里，**不需要再改动 ESPHome 安装目录**（旧版把 `pm2005` 组件塞进 `site-packages`，这里已改为本地组件）。
+上面「改造说明」对应的完整源码、两份配置和编译好的固件都在本仓库里（**全部基于 BRY88AB151K / AB 版，AA 版请勿直接使用**），**不需要再改动 ESPHome 安装目录**（旧版把 `pm2005` 组件塞进 `site-packages`，这里已改为本地组件）。
 
 ### 文件清单
 
@@ -64,8 +78,8 @@
 | `components/pm2005/` | PM2005 / PM2105 的 I²C 组件（`platform: pm2005`，`type: PM2005` 或 `PM2105`） |
 | `components/boot_delay/` | 冷启动延时组件：SSD1306 四脚模块上电慢，初始化前先等待 5s（分片喂狗，不会触发 WDT 复位） |
 | `fonts/` | OLED 界面用 Departure Mono 字体（MIT，见 `fonts/LICENSE`） |
-| `daikin-bry88ab151k-pm2005-oled.yaml` | PM2005（银色金属外壳 PM2.5 传感器）配置，`bit0_inverted: true` |
-| `daikin-bry88ab151k-pm2105-oled.yaml` | PM2105（黑色塑料外壳 PM2.5 传感器）配置，`bit0_inverted: false` |
+| `daikin-bry88ab151k-pm2005-oled.yaml` | PM2005 配置（CM1106 `V1.0x`，早期银色金属外壳批次），`bit0_inverted: true` |
+| `daikin-bry88ab151k-pm2105-oled.yaml` | PM2105 配置（CM1106 `V5.0x`，早期黑色塑料外壳批次），`bit0_inverted: false` |
 | `firmware/2026/*-factory.bin` | 完整刷写镜像（从 `0x0` 写入，Web ESPHome / esptool 用） |
 | `firmware/2026/*-ota.bin` | OTA 升级镜像（网页 OTA / ESPHome 仪表盘用） |
 
@@ -83,6 +97,8 @@ esphome compile daikin-bry88ab151k-pm2005-oled.yaml
 esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 ```
 
+> 环境说明（仅供参考）：本项目的 YAML 与组件是在 **VS Code + PlatformIO（pio）** 环境中编辑、并用 ESPHome CLI 编译验证的；不要求使用相同环境，ESPHome 仪表盘或官方命令行同样可以编译。
+
 编译产物在 `.esphome/build/daikin-air-sensor/build/`：`firmware.factory.bin`（整包）与 `firmware.ota.bin`（OTA）。两份配置的 `esphome.name` 相同，**编译产物会互相覆盖**，需要哪种就先编译哪种并另存。
 
 ### 刷写
@@ -96,9 +112,6 @@ esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 - 感谢[严泽远](https://github.com/nixieclock)大佬的PM2.5传感器[PM2105](http://www.gassensor.com.cn/ParticulateSensor/info_itemid_104.html) Header文件以及各种证件照
 - 感谢MiWyf大佬的甲醛传感器[ZE08-CH20](http://style.winsensor.com/pro_pdf/ZE08-CH2O.pdf) [Header文件](https://github.com/miwyf/ze08-ch2o-esphome)
 - [CM1106二氧化碳传感器](http://www.gassensor.com.cn/CO2Sensor/info_itemid_94.html) [Header文件](https://github.com/LeoDJ/ESPHome_Nodes)
-
-## 购买链接
-不想刷机的老板可以咸鱼搜索用户[是阿辉没错](https://m.tb.cn/h.TiM3dln?tk=4So1eYddumv)，直接购买俺刷好的成品，包含甲醛模块，同时也有兼容原大金APP的甲醛模块单独出售。
 
 ## 来源与致谢
 
