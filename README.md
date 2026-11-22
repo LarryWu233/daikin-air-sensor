@@ -104,7 +104,7 @@ esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 ### 刷写
 
 - 新机 / 救砖：用 `firmware/2026/daikin-bry88ab151k-pm2005-factory.bin` 或 `-pm2105-factory.bin`，从 `0x0` 整包写入（[Web ESPHome](https://web.esphome.io/) 或 `esptool.py write_flash 0x0 <file>`）。
-- 已在跑 ESPHome、要升级：如果你使用的是原作者的固件，必须要使用串口连接转换连接器到主板上刷写，因为本固件升级了ESPHome 2026.11.0的大版本，底层架构发生了极大变化，除非你自己更新过ESP home版本，否则不线刷的话，可能会变砖。
+- 已在跑 ESPHome、要升级：如果你使用的是原作者的固件，必须要使用串口转换器连接到主板上刷写，因为本固件升级了ESPHome 2026.11.0的大版本，整个编译的工具链和组件发生了变化，所以保险起见请线刷防止变砖，不确保通过OTA能否成功刷写。
 - WiFi 凭据没有写进 YAML，也没有打进 bin：首次上电连 `DAIKIN Fallback Hotspot` 配网即可；如需固定凭据，取消 YAML 中 `ssid`/`password` 两行的注释后自行填写。
 
 ## 参考链接
