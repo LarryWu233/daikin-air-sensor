@@ -2,6 +2,10 @@
 .esphome/
 build/
 
+# Python 缓存
+__pycache__/
+*.pyc
+
 # 本地固件与备份（可能包含 WiFi 凭据、设备 MAC/序列号等隐私）
 firmware-local/
 backups/
