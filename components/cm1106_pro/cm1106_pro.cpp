@@ -122,7 +122,7 @@ bool CM1106ProComponent::is_preheating_(uint8_t status) const {
   return this->bit0_inverted_ ? (status & 0x01) == 0 : (status & 0x01) != 0;
 }
 
-void CM1106ProComponent::log_status_(uint8_t status) {
+void CM1106ProComponent::log_status_(uint8_t status, uint16_t ppm) {
   // Log only on state CHANGE (avoid repeating the same line every 10 s). The raw
   // RX frame (with checksum) is already dumped every sample in update().
   if (status == this->last_status_)
@@ -138,12 +138,19 @@ void CM1106ProComponent::log_status_(uint8_t status) {
              was_preheating ? "yes" : "no", is_preheating ? "yes" : "no");
   }
 
-  if (status & 0x02)
-    ESP_LOGW(TAG, "Status: sensor error");
+  // Bit1 is documented as "sensor error", but this hardware also sets it (with a
+  // full-scale reading) once the concentration exceeds the measuring range - that
+  // is out-of-range, not a fault. Only treat Bit1 below full scale as an error.
+  if (status & 0x02) {
+    if (ppm >= RANGE_MAX_PPM)
+      ESP_LOGI(TAG, "Status: measurement above range (%uppm full scale)", ppm);
+    else
+      ESP_LOGW(TAG, "Status: sensor error");
+  }
   if (status & 0x04)
-    ESP_LOGW(TAG, "Status: over measurement range");
+    ESP_LOGI(TAG, "Status: over measurement range");
   if (status & 0x08)
-    ESP_LOGW(TAG, "Status: below measurement range");
+    ESP_LOGI(TAG, "Status: below measurement range");
   if (status & 0x10)
     ESP_LOGW(TAG, "Status: not calibrated");
   if (status & 0x20)
@@ -216,7 +223,7 @@ void CM1106ProComponent::update() {
   if (this->co2_status_sensor_ != nullptr)
     this->co2_status_sensor_->publish_state(status);
 
-  this->log_status_(status);
+  this->log_status_(status, ppm);
 
   if (this->is_preheating_(status)) {
     // Preheating: track duration, warn once if it exceeds the timeout. Do NOT
@@ -231,12 +238,17 @@ void CM1106ProComponent::update() {
     this->status_set_warning();
     return;
   }
-  if (status & 0x02) {
+
+  // This CM1106 variant signals an out-of-range measurement with STATUS Bit1 plus
+  // a full-scale reading (verified frame: 16 05 01 13 88 03 -> 5000 ppm, status
+  // 0x03). Only Bit1 below full scale is a genuine sensor error; range-flag
+  // samples stay valid and keep being published as a bounded value, otherwise HA
+  // would drop to unavailable and the OLED would show "--".
+  const bool sensor_error = (status & 0x02) != 0;
+  const bool above_range = (status & 0x04) != 0 || (sensor_error && ppm >= RANGE_MAX_PPM);
+
+  if (sensor_error && !above_range) {
     this->error_count_++;
-    this->status_set_warning();
-    return;
-  }
-  if (status & 0x0C) {
     this->status_set_warning();
     return;
   }

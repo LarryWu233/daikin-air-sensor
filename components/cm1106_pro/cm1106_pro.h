@@ -47,7 +47,7 @@ class CM1106ProComponent : public PollingComponent, public uart::UARTDevice {
   bool cm1106_write_command_(const uint8_t *command, size_t command_len, uint8_t *response, size_t response_len);
   bool send_command_expect_ack_(const uint8_t *command, size_t command_len, const uint8_t *ack);
   void abc_set_(bool enabled);
-  void log_status_(uint8_t status);
+  void log_status_(uint8_t status, uint16_t ppm);
   void read_firmware_version_();
   void read_serial_number_();
   bool is_preheating_(uint8_t status) const;
@@ -61,6 +61,9 @@ class CM1106ProComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t error_count_{0};
   static constexpr uint32_t STALE_THRESHOLD_MS = 30000;
   static constexpr uint32_t PREHEAT_TIMEOUT_MS = 300000;  // 5 min
+  // CM1106-C measurement range is 400-5000 ppm; the sensor reports this value
+  // together with STATUS Bit1 when the concentration leaves the range.
+  static constexpr uint16_t RANGE_MAX_PPM = 5000;
 
   // Diagnostic state tracking (no logic changes, only logging dedup + timestamps).
   uint8_t last_status_{0xFF};         // previous STATUS byte; 0xFF = first sample
