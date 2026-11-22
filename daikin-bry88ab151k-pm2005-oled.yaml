@@ -1,0 +1,420 @@
+esphome:
+  name: daikin-air-sensor
+  project:
+    name: "DAIKIN.BRY88AB151K"
+    version: "PM2005" #根据PM2.5传感器型号选择，方便后续OTA查找文件
+  name_add_mac_suffix: true
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ cm1106_pro ]
+
+esp32:
+  board: nodemcu-32s
+
+wifi:
+  # ssid: 'YOUR_WIFI_SSID' #首次配网(captive portal)时输入，也可取消注释在此填写
+  # password: 'YOUR_WIFI_PASSWORD'
+  ap:
+    ssid: "DAIKIN Fallback Hotspot"
+
+captive_portal:
+
+api:
+  reboot_timeout: 0s
+
+ota:
+
+web_server:
+  port: 80
+
+logger:
+  logs:
+    hdc1080: WARN
+    sgp30: WARN
+    sensor: WARN
+    component: ERROR
+
+# bluetooth_proxy:  #需要蓝牙代理功能可以打开
+#   active: true
+
+# esp32_ble_tracker:
+
+uart:
+  - id: cm1106_uart
+    rx_pin: 16
+    tx_pin: 17
+    baud_rate: 9600
+
+i2c:
+  - id: pm25_bus
+    sda: 23
+    scl: 22
+    scan: true
+  - id: th_bus
+    sda: 19
+    scl: 21
+    scan: true
+
+sensor:
+  - platform: cm1106_pro
+    id: co2_cm1106
+    update_interval: 10s
+    automatic_baseline_calibration: false #启动时关闭ABC，防止室内基线漂移导致读数偏低
+    bit0_inverted: true #此硬件CM1106的STATUS Bit0写反：0=预热、1=运行（与V0.6规格相反）
+    co2:
+      name: "DAIKIN CO2 Sensor"
+      id: co2sensor
+    co2_raw:
+      name: "DAIKIN CO2 Raw"
+      id: co2raw
+    co2_status:
+      name: "DAIKIN CO2 Status"
+      id: co2status
+    co2_errors:
+      name: "DAIKIN CO2 Errors"
+      id: co2errors
+    co2_last_valid_age:
+      name: "DAIKIN CO2 Last Valid Age"
+      id: co2lastvalidage
+  - platform: pm2005
+    type: PM2005 #根据PM2.5传感器型号选择
+    i2c_id: pm25_bus
+    update_interval: 30s
+    pm_2_5:
+      name: "DAIKIN PM2.5 Sensor"
+      id: pm25sensor
+  - platform: sgp30
+    i2c_id: th_bus
+    compensation:
+      temperature_source: temperature
+      humidity_source: humidity
+    eco2:
+      id: eco2sensor
+      internal: true
+    tvoc:
+      name: "DAIKIN TVOC Sensor"
+      id: tvocsensor
+      unit_of_measurement: "ppb" #原始TVOC单位为ppb，不做不可靠的µg/m³换算
+      filters:
+        - throttle: 15s
+  - platform: hdc1080
+    i2c_id: th_bus
+    update_interval: 15s
+    temperature:
+      name: "DAIKIN Temperature Sensor"
+      id: temperature
+      filters:
+        - lambda: return x - id(temperatureoffset).state;
+    humidity:
+      name: "DAIKIN Humidity Sensor"
+      id: humidity
+      filters:
+        - lambda: return x * id(humiditymultiply).state;
+        - clamp:
+            max_value: 100
+  - platform: wifi_signal
+    name: "DAIKIN Signal"
+
+globals:
+  - id: co2_led_on
+    type: bool
+    initial_value: 'false'
+  - id: pm25_led_on
+    type: bool
+    initial_value: 'false'
+  - id: tvoc_led_on
+    type: bool
+    initial_value: 'false'
+
+switch:
+  - platform: template
+    name: "DAIKIN LED Indicator"
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:led-off
+    id: indicator
+    optimistic: true
+  - platform: template
+    name: "DAIKIN CO2 ABC Auto Calibration"
+    id: abc_switch
+    entity_category: "config"
+    optimistic: true
+    restore_mode: DISABLED #启动状态由 automatic_baseline_calibration 决定，不在此重复下发
+    on_turn_on:
+      - cm1106_pro.abc_enable: co2_cm1106
+    on_turn_off:
+      - cm1106_pro.abc_disable: co2_cm1106
+  - platform: gpio
+    pin: 4
+    id: co2led
+    internal: true
+  - platform: gpio
+    pin: 32
+    id: tvocch2oled
+    internal: true
+  - platform: gpio
+    pin: 33
+    id: pm25led
+    internal: true
+
+status_led:
+  pin: 25
+
+number:
+  - platform: template
+    name: "DAIKIN Threshold CO2"
+    entity_category: "config"
+    id: co2threshold
+    optimistic: true
+    unit_of_measurement: "ppm"
+    min_value: 400
+    max_value: 5000
+    step: 100
+    initial_value: 1000
+    restore_value: true
+  - platform: template
+    name: "DAIKIN CO2 Calibration Target"
+    entity_category: "config"
+    id: calibration_target
+    optimistic: true
+    unit_of_measurement: "ppm"
+    min_value: 400
+    max_value: 1500
+    step: 50
+    initial_value: 400
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Threshold PM2.5"
+    entity_category: "config"
+    id: pm25threshold
+    optimistic: true
+    unit_of_measurement: "µg/m³"
+    min_value: 0
+    max_value: 200
+    step: 10
+    initial_value: 50
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Threshold TVOC"
+    entity_category: "config"
+    id: tvocthreshold
+    optimistic: true
+    unit_of_measurement: "ppb"
+    min_value: 0
+    max_value: 60000
+    step: 100
+    initial_value: 1000
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Humidity Multiply"
+    entity_category: "config"
+    id: humiditymultiply
+    optimistic: true
+    min_value: 1
+    max_value: 1.6
+    step: 0.01
+    initial_value: 1.4
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Temperature Offset"
+    entity_category: "config"
+    id: temperatureoffset
+    optimistic: true
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    initial_value: 6
+    restore_value: true
+
+binary_sensor:
+  - platform: template
+    internal: true
+    id: tvocch2olambda
+    lambda: |-
+      if (!id(tvocsensor).has_state() || !std::isfinite(id(tvocsensor).state)) return id(tvoc_led_on);
+      if (!id(indicator).state) return false;
+      float v = id(tvocsensor).state;
+      float th = id(tvocthreshold).state;
+      if (id(tvoc_led_on)) return v > th - 100.0f;
+      return v > th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: tvoc_led_on
+            value: 'true'
+        - switch.turn_on: tvocch2oled
+    on_release:
+      then:
+        - globals.set:
+            id: tvoc_led_on
+            value: 'false'
+        - switch.turn_off: tvocch2oled
+  - platform: template
+    internal: true
+    id: co2lambda
+    lambda: |-
+      if (!id(co2sensor).has_state() || !std::isfinite(id(co2sensor).state)) return id(co2_led_on);
+      if (!id(indicator).state) return false;
+      float v = id(co2sensor).state;
+      float th = id(co2threshold).state;
+      if (id(co2_led_on)) return v > th - 50.0f;
+      return v > th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: co2_led_on
+            value: 'true'
+        - switch.turn_on: co2led
+    on_release:
+      then:
+        - globals.set:
+            id: co2_led_on
+            value: 'false'
+        - switch.turn_off: co2led
+  - platform: template
+    internal: true
+    id: pm25lambda
+    lambda: |-
+      if (!id(pm25sensor).has_state() || !std::isfinite(id(pm25sensor).state)) return id(pm25_led_on);
+      if (!id(indicator).state) return false;
+      float v = id(pm25sensor).state;
+      float th = id(pm25threshold).state;
+      if (id(pm25_led_on)) return v > th - 10.0f;
+      return v > th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: pm25_led_on
+            value: 'true'
+        - switch.turn_on: pm25led
+    on_release:
+      then:
+        - globals.set:
+            id: pm25_led_on
+            value: 'false'
+        - switch.turn_off: pm25led
+  - platform: gpio
+    pin: 34
+    id: RESET
+    internal: true
+    on_press:
+      then:
+        - button.press: reset
+
+font:
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_label
+    size: 10
+    bpp: 1
+    glyphs: "COPM2.5"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_unit
+    size: 10
+    bpp: 1
+    glyphs: "pmµg/³"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_large
+    size: 13
+    bpp: 1
+    glyphs: "0123456789-"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_medium
+    size: 11
+    bpp: 1
+    glyphs: "0123456789-"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_small
+    size: 10
+    bpp: 1
+    glyphs: "0123456789-"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_climate
+    size: 12
+    bpp: 1
+    glyphs: "0123456789-.°C%RH"
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    i2c_id: th_bus
+    address: 0x3C
+    rotation: 180
+    update_interval: 2s
+    lambda: |-
+      auto measure = [](font::Font *f, const char *text) {
+        int width, offset, baseline, height;
+        f->measure(text, &width, &offset, &baseline, &height);
+        return width;
+      };
+      char co2[16], pm[16], temperature_text[16], humidity_text[16];
+      if (!std::isfinite(id(co2sensor).state) || id(co2sensor).state < 0 || id(co2sensor).state >= 99999.5f)
+        snprintf(co2, sizeof(co2), "--");
+      else snprintf(co2, sizeof(co2), "%.0f", id(co2sensor).state);
+      if (!std::isfinite(id(pm25sensor).state) || id(pm25sensor).state < 0 || id(pm25sensor).state >= 99999.5f)
+        snprintf(pm, sizeof(pm), "--");
+      else snprintf(pm, sizeof(pm), "%.0f", id(pm25sensor).state);
+      if (!std::isfinite(id(temperature).state) || id(temperature).state < -99.9 || id(temperature).state > 999.9)
+        snprintf(temperature_text, sizeof(temperature_text), "--");
+      else snprintf(temperature_text, sizeof(temperature_text), "%.1f°C", id(temperature).state);
+      if (!std::isfinite(id(humidity).state) || id(humidity).state < 0 || id(humidity).state > 100)
+        snprintf(humidity_text, sizeof(humidity_text), "--");
+      else snprintf(humidity_text, sizeof(humidity_text), "%.0f%%RH", id(humidity).state);
+
+      it.print(2, 0, id(departure_label), "CO2");
+      it.print(66, 0, id(departure_label), "PM2.5");
+      auto metric = [&](int x, const char *value, const char *unit) {
+        bool invalid = value[0] == '-' && value[1] == '-';
+        int unit_width = invalid ? 0 : measure(id(departure_unit), unit);
+        font::Font *value_font = id(departure_large);
+        int value_width = measure(value_font, value);
+        if (!invalid && value_width + 2 + unit_width > 62) {
+          value_font = id(departure_medium);
+          value_width = measure(value_font, value);
+        }
+        if (!invalid && value_width + 2 + unit_width > 62) {
+          value_font = id(departure_small);
+          value_width = measure(value_font, value);
+        }
+        bool below = !invalid && value_width + 2 + unit_width > 62;
+        it.print(x, below ? 12 : (value_font == id(departure_small) ? 20 : 19), value_font, value);
+        if (!invalid) it.print(below ? x : x + value_width + 2, below ? 30 : 18, id(departure_unit), unit);
+      };
+      metric(2, co2, "ppm");
+      metric(66, pm, "µg/m³");
+      it.horizontal_line(2, 42, 124);
+      it.print(2, 47, id(departure_climate), temperature_text);
+      it.print(76, 47, id(departure_climate), humidity_text);
+
+button:
+  - platform: restart
+    name: "DAIKIN Restart"
+    entity_category: "diagnostic"
+  - platform: factory_reset
+    id: reset
+    internal: true
+  - platform: template
+    name: "DAIKIN Read CM1106 Version"
+    entity_category: "diagnostic"
+    on_press:
+      then:
+        - cm1106_pro.read_version: co2_cm1106
+  - platform: template
+    name: "DAIKIN CO2 Manual Calibration" #按下后把当前环境CO2校准到 Calibration Target 的目标值；仅在已预热且处于稳定参考环境时操作
+    entity_category: "diagnostic"
+    on_press:
+      then:
+        - cm1106_pro.calibrate_zero:
+            id: co2_cm1106
+            ppm: !lambda "return (uint16_t) id(calibration_target).state;"
+

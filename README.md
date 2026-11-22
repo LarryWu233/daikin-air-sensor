@@ -52,6 +52,45 @@
 
 > 判别方法（无需拆机）：先点「读取 CM1106 版本」，`V1.0x` 系列按 `bit0_inverted: true`、`V5.0x` 系列按 `false`；也可观察 STATUS 字节与读数是否吻合来判定（STATUS=0 时读数仍冻结在 550ppm，说明该机 Bit0 写反，应设 `true`）。
 
+## 2026 改造版源码与固件（OLED 显示）
+
+上面「改造说明」对应的完整源码、两份配置和编译好的固件都在本仓库里，**不需要再改动 ESPHome 安装目录**（旧版把 `pm2005` 组件塞进 `site-packages`，这里已改为本地组件）。
+
+### 文件清单
+
+| 路径 | 说明 |
+|---|---|
+| `components/cm1106_pro/` | 增强版 CM1106 驱动（UART），含 `bit0_inverted`、`0x1E` 按 LEN 动态解析、状态位分级发布、ABC 校准与 `read_version` 动作 |
+| `components/pm2005/` | PM2005 / PM2105 的 I²C 组件（`platform: pm2005`，`type: PM2005` 或 `PM2105`） |
+| `components/boot_delay/` | 冷启动延时组件：SSD1306 四脚模块上电慢，初始化前先等待 5s（分片喂狗，不会触发 WDT 复位） |
+| `fonts/` | OLED 界面用 Departure Mono 字体（MIT，见 `fonts/LICENSE`） |
+| `daikin-bry88ab151k-pm2005-oled.yaml` | PM2005（银色金属外壳 PM2.5 传感器）配置，`bit0_inverted: true` |
+| `daikin-bry88ab151k-pm2105-oled.yaml` | PM2105（黑色塑料外壳 PM2.5 传感器）配置，`bit0_inverted: false` |
+| `firmware/2026/*-factory.bin` | 完整刷写镜像（从 `0x0` 写入，Web ESPHome / esptool 用） |
+| `firmware/2026/*-ota.bin` | OTA 升级镜像（网页 OTA / ESPHome 仪表盘用） |
+
+与上游 `header/*.h` + 原 YAML 的两点差异：
+
+- 上游 YAML 用 `includes: cm1106.h` 的裸头文件 + `custom` 平台，需要按上面第 2 步把头文件**复制到 ESPHome 配置目录**才能编译；本版改为仓库内本地组件，配好 `external_components` 即可直接编译，无需复制头文件。
+- PM2005/PM2105 的差异被收敛成 YAML 里的两个参数：`type:`（`PM2005`/`PM2105`）和 `bit0_inverted:`（`true`/`false`），固件与驱动完全共用一份。
+
+### 编译
+
+环境：ESPHome `2026.11.0`（ESP-IDF 5.5），在仓库根目录执行：
+
+```bash
+esphome compile daikin-bry88ab151k-pm2005-oled.yaml
+esphome compile daikin-bry88ab151k-pm2105-oled.yaml
+```
+
+编译产物在 `.esphome/build/daikin-air-sensor/build/`：`firmware.factory.bin`（整包）与 `firmware.ota.bin`（OTA）。两份配置的 `esphome.name` 相同，**编译产物会互相覆盖**，需要哪种就先编译哪种并另存。
+
+### 刷写
+
+- 新机 / 救砖：用 `firmware/2026/daikin-bry88ab151k-pm2005-factory.bin` 或 `-pm2105-factory.bin`，从 `0x0` 整包写入（[Web ESPHome](https://web.esphome.io/) 或 `esptool.py write_flash 0x0 <file>`）。
+- 已在跑 ESPHome、要升级：用对应的 `-ota.bin`，通过网页 OTA 或 ESPHome 仪表盘推送，**不要**用 factory 镜像走 OTA。
+- WiFi 凭据没有写进 YAML，也没有打进 bin：首次上电连 `DAIKIN Fallback Hotspot` 配网即可；如需固定凭据，取消 YAML 中 `ssid`/`password` 两行的注释后自行填写。
+
 ## 参考链接
 - 感谢C佬的[视频教程](https://www.bilibili.com/video/BV1PY4y1y7sE)
 - 感谢[严泽远](https://github.com/nixieclock)大佬的PM2.5传感器[PM2105](http://www.gassensor.com.cn/ParticulateSensor/info_itemid_104.html) Header文件以及各种证件照
