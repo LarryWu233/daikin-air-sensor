@@ -61,3 +61,10 @@
 
 ## 购买链接
 不想刷机的老板可以咸鱼搜索用户[是阿辉没错](https://m.tb.cn/h.TiM3dln?tk=4So1eYddumv)，直接购买俺刷好的成品，包含甲醛模块，同时也有兼容原大金APP的甲醛模块单独出售。
+
+## 来源与致谢
+
+- 本项目基于 [louliangsheng/daikin-air-sensor](https://github.com/louliangsheng/daikin-air-sensor)（BRY88AA151K/BRY88AB151K 大金空气传感器 ESPHome 固件）二次开发，主要改造集中在 CM1106 二氧化碳驱动：按设备固件版本适配 STATUS Bit0 预热位极性（`bit0_inverted`）、`0x1E` 固件版本按 LEN 动态解析、状态位分级发布与诊断日志等，详见上文「CM1106 固件版本差异」与「改造说明」两节。
+- 上游仓库未单独声明开源 License（GitHub 显示 `license: null`）。本项目沿用上游的开放引用方式，不额外附加限制性协议；代码仅供个人学习与交流使用，不用于商业用途。如需商用或再分发，请先取得原作者及下列各位参考作者的授权，并保留出处与致谢。
+- 感谢原作者 [louliangsheng](https://github.com/louliangsheng)，以及原 README 致谢中的 C佬（[视频教程](https://www.bilibili.com/video/BV1PY4y1y7sE)）、[严泽远](https://github.com/nixieclock)（PM2105/PM2005 Header 与资料）、MiWyf（[ZE08-CH2O Header](https://github.com/miwyf/ze08-ch2o-esphome)）、[LeoDJ](https://github.com/LeoDJ/ESPHome_Nodes)（CM1106 Header）。
+- 本项目对上述硬件协议差异的实测记录：PM2005 主机 CM1106 固件 `V1.06.3.00`（STATUS Bit0 极性反转、`0x1E` 返回 15 字节），PM2105 主机 CM1106 固件 `V5.06.3.02`（STATUS Bit0 符合规格、`0x1E` 返回 14 字节）。
