@@ -108,6 +108,9 @@ esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 - 已在跑 ESPHome、要升级：如果你使用的是原作者的固件，必须要使用串口转换器连接到主板上刷写，因为本固件升级了ESPHome 2026.11.0的大版本，整个编译的工具链和组件发生了变化，所以保险起见请线刷防止变砖，不确保通过OTA能否成功刷写。
 - WiFi 凭据没有写进 YAML，也没有打进 bin：首次上电连 `DAIKIN Fallback Hotspot` 配网即可；如需固定凭据，取消 YAML 中 `ssid`/`password` 两行的注释后自行填写。
 
+### CO2校准
+- 刷写好后根据你当地记录的平均大气CO2浓度，例如480PPM，在ESP HOME管理端口找到**DAIKIN Threshold CO2**选项调整到所在地平均大气CO2浓度数值，到室外开阔，通风，远离马路或者污染排放源到地方，上电10-20分钟等待数值稳定后，点击**DAIKIN CO2 Manual Calibration**选项进行完全校准，传感器自动校准默认是关闭的，防止在CO2浓度高的室内自校准为不准确的基线，造成虚高**（不校准到话，大概率虚高一倍以上）**。
+
 ## 参考链接
 - 感谢C佬的[视频教程](https://www.bilibili.com/video/BV1PY4y1y7sE)
 - 感谢[严泽远](https://github.com/nixieclock)大佬的PM2.5传感器[PM2105](http://www.gassensor.com.cn/ParticulateSensor/info_itemid_104.html) Header文件以及各种证件照
