@@ -134,6 +134,9 @@ sensor:
               float sustained_threshold = id(tvocthreshold).state;
               if (!std::isfinite(sustained_threshold) || sustained_threshold <= 0.0f)
                 sustained_threshold = 1000.0f;
+              float extreme_threshold = id(tvochardlimit).state;
+              if (!std::isfinite(extreme_threshold) || extreme_threshold <= 0.0f)
+                extreme_threshold = 10000.0f;
               const float clear_threshold = sustained_threshold * 0.60f;
 
               if (!id(tvoc_alert_active)) {
@@ -143,7 +146,7 @@ sensor:
                 } else {
                   id(tvoc_high_since) = 0;
                 }
-                if (x >= 10000.0f) {
+                if (x >= extreme_threshold) {
                   if (id(tvoc_extreme_since) == 0) id(tvoc_extreme_since) = now;
                 } else {
                   id(tvoc_extreme_since) = 0;
@@ -198,6 +201,18 @@ globals:
     type: bool
     initial_value: 'false'
   - id: tvoc_led_on
+    type: bool
+    initial_value: 'false'
+  - id: co2_hard_on
+    type: bool
+    initial_value: 'false'
+  - id: pm25_hard_on
+    type: bool
+    initial_value: 'false'
+  - id: tvoc_hard_on
+    type: bool
+    initial_value: 'false'
+  - id: led_flash_phase
     type: bool
     initial_value: 'false'
   - id: tvoc_alert_active
@@ -298,6 +313,39 @@ number:
     initial_value: 1000
     restore_value: true
   - platform: template
+    name: "DAIKIN Hard Limit CO2"
+    entity_category: "config"
+    id: co2hardlimit
+    optimistic: true
+    unit_of_measurement: "ppm"
+    min_value: 400
+    max_value: 5000
+    step: 100
+    initial_value: 2000
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Hard Limit PM2.5"
+    entity_category: "config"
+    id: pm25hardlimit
+    optimistic: true
+    unit_of_measurement: "µg/m³"
+    min_value: 0
+    max_value: 1000
+    step: 10
+    initial_value: 150
+    restore_value: true
+  - platform: template
+    name: "DAIKIN Hard Limit TVOC"
+    entity_category: "config"
+    id: tvochardlimit
+    optimistic: true
+    unit_of_measurement: "ppb"
+    min_value: 0
+    max_value: 60000
+    step: 1000
+    initial_value: 10000
+    restore_value: true
+  - platform: template
     name: "DAIKIN Humidity Multiply"
     entity_category: "config"
     id: humiditymultiply
@@ -337,13 +385,11 @@ binary_sensor:
         - globals.set:
             id: tvoc_led_on
             value: 'true'
-        - switch.turn_on: tvocch2oled
     on_release:
       then:
         - globals.set:
             id: tvoc_led_on
             value: 'false'
-        - switch.turn_off: tvocch2oled
   - platform: template
     internal: true
     id: co2lambda
@@ -362,13 +408,11 @@ binary_sensor:
         - globals.set:
             id: co2_led_on
             value: 'true'
-        - switch.turn_on: co2led
     on_release:
       then:
         - globals.set:
             id: co2_led_on
             value: 'false'
-        - switch.turn_off: co2led
   - platform: template
     internal: true
     id: pm25lambda
@@ -387,13 +431,81 @@ binary_sensor:
         - globals.set:
             id: pm25_led_on
             value: 'true'
-        - switch.turn_on: pm25led
     on_release:
       then:
         - globals.set:
             id: pm25_led_on
             value: 'false'
-        - switch.turn_off: pm25led
+  - platform: template
+    internal: true
+    id: co2hardlambda
+    lambda: |-
+      if (!id(co2sensor).has_state() || !std::isfinite(id(co2sensor).state)) return id(co2_hard_on);
+      if (!id(indicator).state) return false;
+      float v = id(co2sensor).state;
+      float th = id(co2hardlimit).state;
+      if (id(co2_hard_on)) return v > th - 100.0f;
+      return v >= th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: co2_hard_on
+            value: 'true'
+    on_release:
+      then:
+        - globals.set:
+            id: co2_hard_on
+            value: 'false'
+  - platform: template
+    internal: true
+    id: pm25hardlambda
+    lambda: |-
+      if (!id(pm25sensor).has_state() || !std::isfinite(id(pm25sensor).state)) return id(pm25_hard_on);
+      if (!id(indicator).state) return false;
+      float v = id(pm25sensor).state;
+      float th = id(pm25hardlimit).state;
+      if (id(pm25_hard_on)) return v > th - 20.0f;
+      return v >= th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: pm25_hard_on
+            value: 'true'
+    on_release:
+      then:
+        - globals.set:
+            id: pm25_hard_on
+            value: 'false'
+  - platform: template
+    internal: true
+    id: tvochardlambda
+    lambda: |-
+      if (!id(tvocsensor).has_state() || !std::isfinite(id(tvocsensor).state)) return id(tvoc_hard_on);
+      if (!id(indicator).state) return false;
+      if (!id(tvoc_baseline_ready) && millis() < 12UL * 60UL * 60UL * 1000UL) return false;
+      float v = id(tvocsensor).state;
+      float th = id(tvochardlimit).state;
+      if (id(tvoc_hard_on)) return v > th - 1000.0f;
+      return v >= th;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
+    on_press:
+      then:
+        - globals.set:
+            id: tvoc_hard_on
+            value: 'true'
+    on_release:
+      then:
+        - globals.set:
+            id: tvoc_hard_on
+            value: 'false'
   - platform: gpio
     pin: 34
     id: RESET
@@ -401,6 +513,23 @@ binary_sensor:
     on_press:
       then:
         - button.press: reset
+
+interval:
+  - interval: 250ms
+    then:
+      - lambda: |-
+          id(led_flash_phase) = !id(led_flash_phase);
+          const bool enabled = id(indicator).state;
+          const bool phase = id(led_flash_phase);
+
+          if (enabled && (id(co2_hard_on) ? phase : id(co2_led_on))) id(co2led).turn_on();
+          else id(co2led).turn_off();
+
+          if (enabled && (id(pm25_hard_on) ? phase : id(pm25_led_on))) id(pm25led).turn_on();
+          else id(pm25led).turn_off();
+
+          if (enabled && (id(tvoc_hard_on) ? phase : id(tvoc_led_on))) id(tvocch2oled).turn_on();
+          else id(tvocch2oled).turn_off();
 
 font:
   - file: fonts/departure-mono-11px-square.ttf
