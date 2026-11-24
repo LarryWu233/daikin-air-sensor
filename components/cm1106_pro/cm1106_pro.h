@@ -45,6 +45,7 @@ class CM1106ProComponent : public PollingComponent, public uart::UARTDevice {
 
  protected:
   bool cm1106_write_command_(const uint8_t *command, size_t command_len, uint8_t *response, size_t response_len);
+  bool read_co2_frame_(uint8_t (&response)[8]);
   bool send_command_expect_ack_(const uint8_t *command, size_t command_len, const uint8_t *ack);
   void abc_set_(bool enabled);
   void log_status_(uint8_t status, uint16_t ppm);
@@ -56,6 +57,7 @@ class CM1106ProComponent : public PollingComponent, public uart::UARTDevice {
   uint8_t abc_cycle_{15};
   uint16_t abc_baseline_{400};
 
+  bool initialized_{false};
   bool has_valid_{false};
   uint32_t last_valid_millis_{0};
   uint32_t error_count_{0};

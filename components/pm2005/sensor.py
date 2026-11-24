@@ -8,12 +8,14 @@ from esphome.const import (
     CONF_PM_2_5,
     CONF_PM_10_0,
     CONF_TYPE,
+    DEVICE_CLASS_DURATION,
     DEVICE_CLASS_PM1,
     DEVICE_CLASS_PM10,
     DEVICE_CLASS_PM25,
     ICON_CHEMICAL_WEAPON,
     STATE_CLASS_MEASUREMENT,
     UNIT_MICROGRAMS_PER_CUBIC_METER,
+    UNIT_SECOND,
 )
 from esphome.types import ConfigType
 
@@ -27,6 +29,13 @@ PM2005Component = pm2005_ns.class_(
 
 SensorType = pm2005_ns.enum("SensorType")
 SENSOR_TYPE = SensorType.options("PM2005", "PM2105")
+CONF_LAST_COMMUNICATION_AGE = "last_communication_age"
+CONF_LAST_VALID_AGE = "last_valid_age"
+AGE_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_SECOND,
+    accuracy_decimals=0,
+    device_class=DEVICE_CLASS_DURATION,
+)
 
 
 CONFIG_SCHEMA = cv.All(
@@ -55,6 +64,8 @@ CONFIG_SCHEMA = cv.All(
                 device_class=DEVICE_CLASS_PM10,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+            cv.Optional(CONF_LAST_COMMUNICATION_AGE): AGE_SCHEMA,
+            cv.Optional(CONF_LAST_VALID_AGE): AGE_SCHEMA,
         },
     )
     .extend(cv.polling_component_schema("60s"))
@@ -72,3 +83,5 @@ async def to_code(config: ConfigType) -> None:
     await sensors(CONF_PM_1_0, var.set_pm_1_0_sensor)
     await sensors(CONF_PM_2_5, var.set_pm_2_5_sensor)
     await sensors(CONF_PM_10_0, var.set_pm_10_0_sensor)
+    await sensors(CONF_LAST_COMMUNICATION_AGE, var.set_last_communication_age_sensor)
+    await sensors(CONF_LAST_VALID_AGE, var.set_last_valid_age_sensor)

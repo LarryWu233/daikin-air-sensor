@@ -1,6 +1,8 @@
 #include "esphome/core/log.h"
 #include "pm2005.h"
 
+#include <cmath>
+
 namespace esphome::pm2005 {
 
 ESPHOME_LOG_TAG(TAG, "pm2005");
@@ -52,30 +54,48 @@ void PM2005Component::setup() {
     this->measuring_value_index_ = 9;
   }
 
-  if (this->read(this->data_buffer_, 12) != i2c::ERROR_OK) {
-    this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
-    return;
+  this->update();
+  for (uint32_t delay_ms : {1000U, 2000U}) {
+    this->set_timeout(delay_ms, [this]() {
+      if (!this->has_communication_)
+        this->update();
+    });
   }
 }
 
 void PM2005Component::update() {
-  if (this->read(this->data_buffer_, 12) != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "Read result failed");
+  const uint32_t now = millis();
+  if (this->read(this->data_buffer_, sizeof(this->data_buffer_)) != i2c::ERROR_OK) {
+    if (this->communication_failures_ < COMMUNICATION_FAILURE_LIMIT) {
+      ++this->communication_failures_;
+      ESP_LOGW(TAG, "Read result failed (%u/%u)", this->communication_failures_, COMMUNICATION_FAILURE_LIMIT);
+    }
     this->status_set_warning();
+    if (this->communication_failures_ >= COMMUNICATION_FAILURE_LIMIT)
+      this->invalidate_reading_();
+    this->publish_ages_(now);
     return;
   }
 
-  if (this->sensor_situation_ == this->data_buffer_[this->situation_value_index_]) {
-    return;
-  }
+  this->has_communication_ = true;
+  this->communication_failures_ = 0;
+  this->last_communication_ms_ = now;
 
-  this->sensor_situation_ = this->data_buffer_[this->situation_value_index_];
-  ESP_LOGD(TAG, "Sensor situation: %s.", LOG_STR_ARG(pm2005_get_situation_string(this->sensor_situation_)));
+  const uint8_t situation = this->data_buffer_[this->situation_value_index_];
+  const bool situation_changed = situation != this->sensor_situation_;
+  this->sensor_situation_ = situation;
+  if (situation_changed)
+    ESP_LOGD(TAG, "Sensor situation: %s.", LOG_STR_ARG(pm2005_get_situation_string(situation)));
   if (this->sensor_situation_ == 2) {
     this->status_set_warning();
+    this->invalidate_reading_();
+    this->publish_ages_(now);
     return;
   }
+  this->status_clear_warning();
   if (this->sensor_situation_ != 0x80) {
+    // An idle or measuring module can still supply a usable previous result.
+    this->publish_ages_(now);
     return;
   }
 
@@ -83,6 +103,18 @@ void PM2005Component::update() {
   const uint16_t pm25 = get_sensor_value(this->data_buffer_, this->pm_2_5_value_index_);
   const uint16_t pm10 = get_sensor_value(this->data_buffer_, this->pm_10_0_value_index_);
   const uint16_t sensor_measuring_mode = get_sensor_value(this->data_buffer_, this->measuring_value_index_);
+  if (this->reading_available_ && !situation_changed && sensor_measuring_mode != 3 && pm1 == this->last_pm1_ &&
+      pm25 == this->last_pm25_ && pm10 == this->last_pm10_) {
+    this->publish_ages_(now);
+    return;
+  }
+
+  this->last_pm1_ = pm1;
+  this->last_pm25_ = pm25;
+  this->last_pm10_ = pm10;
+  this->has_valid_result_ = true;
+  this->reading_available_ = true;
+  this->last_valid_result_ms_ = now;
   ESP_LOGD(TAG, "PM1.0: %d, PM2.5: %d, PM10: %d, Measuring mode: %s.", pm1, pm25, pm10,
            LOG_STR_ARG(pm2005_get_measuring_mode_string(sensor_measuring_mode)));
 
@@ -90,7 +122,23 @@ void PM2005Component::update() {
   PUBLISH_STATE(this->pm_2_5_sensor_, pm25);
   PUBLISH_STATE(this->pm_10_0_sensor_, pm10);
 
-  this->status_clear_warning();
+  this->publish_ages_(now);
+}
+
+void PM2005Component::publish_ages_(uint32_t now) {
+  PUBLISH_STATE(this->last_communication_age_sensor_,
+                this->has_communication_ ? (now - this->last_communication_ms_) / 1000.0f : NAN);
+  PUBLISH_STATE(this->last_valid_age_sensor_,
+                this->has_valid_result_ ? (now - this->last_valid_result_ms_) / 1000.0f : NAN);
+}
+
+void PM2005Component::invalidate_reading_() {
+  if (!this->reading_available_)
+    return;
+  this->reading_available_ = false;
+  PUBLISH_STATE(this->pm_1_0_sensor_, NAN);
+  PUBLISH_STATE(this->pm_2_5_sensor_, NAN);
+  PUBLISH_STATE(this->pm_10_0_sensor_, NAN);
 }
 
 void PM2005Component::dump_config() {
@@ -104,6 +152,8 @@ void PM2005Component::dump_config() {
   LOG_SENSOR("  ", "PM1.0", this->pm_1_0_sensor_);
   LOG_SENSOR("  ", "PM2.5", this->pm_2_5_sensor_);
   LOG_SENSOR("  ", "PM10 ", this->pm_10_0_sensor_);
+  LOG_SENSOR("  ", "Last communication age", this->last_communication_age_sensor_);
+  LOG_SENSOR("  ", "Last valid result age", this->last_valid_age_sensor_);
 }
 
 }  // namespace esphome::pm2005

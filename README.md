@@ -80,7 +80,7 @@
 | `components/cm1106_pro/` | 增强版 CM1106 驱动（UART），含 `bit0_inverted`、`0x1E` 按 LEN 动态解析、状态位分级发布、ABC 校准与 `read_version` 动作 |
 | `components/pm2005/` | PM2005 / PM2105 的 I²C 组件（`platform: pm2005`，`type: PM2005` 或 `PM2105`） |
 | `components/boot_delay/` | 冷启动延时组件：SSD1306 四脚模块上电慢，初始化前先等待 5s（分片喂狗，不会触发 WDT 复位） |
-| `fonts/` | OLED 界面用 Departure Mono 字体（MIT，见 `fonts/LICENSE`） |
+| `fonts/` | OLED 界面用 Departure Mono Square 字体（SIL OFL 1.1，见 `fonts/LICENSE`） |
 | `daikin-bry88ab151k-pm2005-oled.yaml` | PM2005 配置（CM1106 `V1.0x`，早期银色金属外壳批次），`bit0_inverted: true` |
 | `daikin-bry88ab151k-pm2105-oled.yaml` | PM2105 配置（CM1106 `V5.0x`，早期黑色塑料外壳批次），`bit0_inverted: false` |
 | `firmware/2026/*-factory.bin` | 完整刷写镜像（从 `0x0` 写入，Web ESPHome / esptool 用） |
@@ -89,7 +89,14 @@
 与上游 `header/*.h` + 原 YAML 的两点差异：
 
 - 上游 YAML 用 `includes: cm1106.h` 的裸头文件 + `custom` 平台，需要按上面第 2 步把头文件**复制到 ESPHome 配置目录**才能编译；本版改为仓库内本地组件，配好 `external_components` 即可直接编译，无需复制头文件。
-- PM2005/PM2105 的差异被收敛成 YAML 里的两个参数：`type:`（`PM2005`/`PM2105`）和 `bit0_inverted:`（`true`/`false`），固件与驱动完全共用一份。
+- 两套配置共享传感器驱动。PM 型号由 `type` 选择，CM1106 的预热状态位由 `bit0_inverted` 适配；PM2105 配置另有 OLED 冷启动延时。
+- PM 和 CO₂ 上电读取失败时，会在约 1 秒和 2 秒后重试，之后继续按各自的轮询周期探测。
+
+### PM2.5 测量与读数更新时间
+
+两台实机都曾报告 `Dynamic`。颗粒物模块自行安排测量，ESPHome 每 30 秒通过 I²C 读取一次，驱动没有开关模块电源或切换模式。动态模式会保留上一笔结果，测量间隔也不能用来推断风扇是否停转。
+
+`DAIKIN PM Last Communication Age` 是距上次 I²C 读取成功的秒数。`DAIKIN PM Last Valid Age` 是距驱动上次接受测量结果的秒数。动态模式中，如果连续两次都显示测量完成、且三个颗粒物数值相同，驱动无法确认是否完成了一次新测量，结果年龄会继续增长。连续三次 I²C 读取失败或模块报告故障时，读数转为不可用；收到有效结果后自动恢复。
 
 ### 编译
 
@@ -102,7 +109,7 @@ esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 
 > 环境说明（仅供参考）：本项目的 YAML 与组件是在 **VS Code + PlatformIO（pio）** 环境中编辑、并用 ESPHome CLI 编译验证的；不要求使用相同环境，ESPHome 仪表盘或官方命令行同样可以编译。
 
-编译产物在 `.esphome/build/daikin-air-sensor/build/`：`firmware.factory.bin`（整包）与 `firmware.ota.bin`（OTA）。两份配置的 `esphome.name` 相同，**编译产物会互相覆盖**，需要哪种就先编译哪种并另存。
+PM2005 和 PM2105 的产物分别位于 `.esphome/build/daikin-air-sensor-pm2005/build/` 和 `.esphome/build/daikin-air-sensor-pm2105/build/`。各目录下的 `firmware.factory.bin` 用于整包刷写，`firmware.ota.bin` 用于 OTA。设备名称仍按原配置加 MAC 后缀。
 
 ### 刷写
 
@@ -111,7 +118,8 @@ esphome compile daikin-bry88ab151k-pm2105-oled.yaml
 - WiFi 凭据没有写进 YAML，也没有打进 bin：首次上电连 `DAIKIN Fallback Hotspot` 配网即可；如需固定凭据，取消 YAML 中 `ssid`/`password` 两行的注释后自行填写。
 
 ### CO2校准
-- 刷写好后根据你当地记录的平均大气CO2浓度，例如480PPM，到室外开阔，通风，远离马路或者污染排放源到地方，上电10-20分钟等待数值稳定后，在ESP HOME管理端口找到**DAIKIN Threshold CO2**选项调整到所在地平均大气CO2浓度数值，点击**DAIKIN CO2 Manual Calibration**选项进行完全校准，传感器自动校准默认是关闭的，防止在CO2浓度高的室内自校准为不准确的基线，造成虚高 **（不校准到话，大概率虚高一倍以上）**。
+- 需要手动校准时，把设备放在通风、远离呼气和排放源的参考环境，预热完成并等待读数稳定。用参考仪器确认当前 CO₂ 浓度，在 ESPHome 管理页填写 **DAIKIN CO2 Calibration Target**，再按 **DAIKIN CO2 Manual Calibration**。**DAIKIN Threshold CO2** 调整的是指示灯阈值。
+- 驱动要求 400–1500 ppm 的目标值，并在发校准命令前复读一帧。缺少近期有效读数、预热中、故障或报告超出量程时会拒绝操作，结果记在设备日志中。自动基线校准默认关闭。
 
 ## 参考链接
 - 感谢C佬的[视频教程](https://www.bilibili.com/video/BV1PY4y1y7sE)

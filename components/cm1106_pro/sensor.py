@@ -7,9 +7,8 @@ Extends the official CM1106 driver with:
 - co2_errors        : cumulative error counter
 - co2_last_valid_age: seconds since the last valid measurement
 
-Strict status handling (CM1106-C V0.6): preheat (bit0), sensor error (bit1),
-over/under range (bit2/bit3) are never published as valid CO2. Not-calibrated
-(bit4), light-aging (bit5), drift (bit6) are warnings but still publish.
+Preheat and sensor errors suppress CO2 readings. Range limits are published as
+reported by the module. Calibration, light-aging and drift flags are logged.
 """
 
 from esphome import automation

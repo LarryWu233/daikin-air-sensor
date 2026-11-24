@@ -2,6 +2,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cmath>
 #include <cstring>
@@ -29,19 +30,12 @@ static uint8_t cm1106_pro_checksum(const uint8_t *data, size_t len) {
 }
 
 void CM1106ProComponent::setup() {
-  uint8_t response[8] = {0};
-  if (!this->cm1106_write_command_(C_M1106_CMD_GET_CO2, sizeof(C_M1106_CMD_GET_CO2), response, sizeof(response))) {
-    this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
-    return;
-  }
-
-  // Read the internal firmware version (0x1E) once at boot to confirm whether
-  // this is a different protocol variant (the STATUS Bit0 semantics are inverted
-  // on this hardware vs the CM1106-C V0.6 spec).
-  this->read_firmware_version_();
-
-  if (this->abc_boot_logic_ != CM1106_ABC_NONE) {
-    this->abc_set_(this->abc_boot_logic_ == CM1106_ABC_ENABLED);
+  this->update();
+  for (uint32_t delay_ms : {1000U, 2000U}) {
+    this->set_timeout(delay_ms, [this]() {
+      if (!this->initialized_)
+        this->update();
+    });
   }
 }
 
@@ -63,13 +57,14 @@ void CM1106ProComponent::read_firmware_version_() {
     ESP_LOGW(TAG, "FW version unexpected header: %02X %02X %02X", header[0], header[1], header[2]);
     return;
   }
-  uint8_t len = header[1];
-  if (len < 1 || len > 14) {
+  uint8_t buf[16] = {0};
+  const uint8_t len = header[1];
+  const size_t total = size_t(len) + 3;  // Frame marker + LEN + payload + checksum.
+  if (len < 1 || total > sizeof(buf)) {
     ESP_LOGW(TAG, "FW version bad length: %u", len);
     return;
   }
-  uint8_t data_len = len - 1;
-  uint8_t buf[16] = {0};
+  const size_t data_len = len - 1;
   buf[0] = header[0];
   buf[1] = header[1];
   buf[2] = header[2];
@@ -77,15 +72,13 @@ void CM1106ProComponent::read_firmware_version_() {
     ESP_LOGW(TAG, "Read firmware version failed (no data)");
     return;
   }
-  uint8_t total = 3 + data_len + 1;
   uint8_t checksum = cm1106_pro_checksum(buf, total);
   if (buf[total - 1] != checksum) {
     ESP_LOGW(TAG, "FW version checksum mismatch: got 0x%02X expected 0x%02X", buf[total - 1], checksum);
     return;
   }
   char fw[11] = {0};
-  uint8_t copy = data_len < 10 ? data_len : 10;
-  memcpy(fw, &buf[3], copy);
+  memcpy(fw, &buf[3], std::min(data_len, sizeof(fw) - 1));
   ESP_LOGI(TAG, "CM1106 firmware version: \"%s\"", fw);
 }
 
@@ -163,40 +156,15 @@ void CM1106ProComponent::log_status_(uint8_t status, uint16_t ppm) {
   this->last_status_ = status;
 }
 
-void CM1106ProComponent::update() {
-  const uint32_t now = millis();
-
-  if (this->co2_errors_sensor_ != nullptr)
-    this->co2_errors_sensor_->publish_state(this->error_count_);
-
-  if (this->has_valid_) {
-    uint32_t age_s = (now - this->last_valid_millis_) / 1000;
-    if (this->co2_last_valid_age_sensor_ != nullptr)
-      this->co2_last_valid_age_sensor_->publish_state(age_s);
-    if ((now - this->last_valid_millis_) > STALE_THRESHOLD_MS) {
-      if (!this->stale_warned_) {
-        ESP_LOGW(TAG, "No valid CO2 data for >%us; invalidating reading",
-                 static_cast<unsigned>(STALE_THRESHOLD_MS / 1000));
-        this->stale_warned_ = true;
-      }
-      if (this->co2_sensor_ != nullptr)
-        this->co2_sensor_->publish_state(NAN);
-    }
-  }
-
-  uint8_t response[8] = {0};
+bool CM1106ProComponent::read_co2_frame_(uint8_t (&response)[8]) {
   if (!this->cm1106_write_command_(C_M1106_CMD_GET_CO2, sizeof(C_M1106_CMD_GET_CO2), response, sizeof(response))) {
     ESP_LOGW(TAG, "Reading data failed!");
-    this->error_count_++;
-    this->status_set_warning();
-    return;
+    return false;
   }
 
   if (response[0] != 0x16 || response[1] != 0x05 || response[2] != 0x01) {
     ESP_LOGW(TAG, "Unexpected response: %02X %02X %02X %02X", response[0], response[1], response[2], response[3]);
-    this->error_count_++;
-    this->status_set_warning();
-    return;
+    return false;
   }
 
   uint8_t checksum = cm1106_pro_checksum(response, sizeof(response));
@@ -205,14 +173,46 @@ void CM1106ProComponent::update() {
   // also visible. Lets us tell "sensor really reports status=01" from "corrupt
   // UART frame" (checksum FAIL).
   ESP_LOGD(TAG, "RX[%ums] %02X %02X %02X %02X %02X %02X %02X %02X chk=%02X %s",
-           (unsigned) now, response[0], response[1], response[2], response[3], response[4], response[5],
+           (unsigned) millis(), response[0], response[1], response[2], response[3], response[4], response[5],
            response[6], response[7], checksum, response[7] == checksum ? "OK" : "FAIL");
 
   if (response[7] != checksum) {
     ESP_LOGW(TAG, "Checksum mismatch: got 0x%02X expected 0x%02X", response[7], checksum);
+    return false;
+  }
+  return true;
+}
+
+void CM1106ProComponent::update() {
+  const uint32_t now = millis();
+  if (this->co2_errors_sensor_ != nullptr)
+    this->co2_errors_sensor_->publish_state(this->error_count_);
+
+  if (this->has_valid_) {
+    const uint32_t age = now - this->last_valid_millis_;
+    if (this->co2_last_valid_age_sensor_ != nullptr)
+      this->co2_last_valid_age_sensor_->publish_state(age / 1000);
+    if (age > STALE_THRESHOLD_MS && !this->stale_warned_) {
+      ESP_LOGW(TAG, "No valid CO2 data for >%us; invalidating reading",
+               static_cast<unsigned>(STALE_THRESHOLD_MS / 1000));
+      this->stale_warned_ = true;
+      if (this->co2_sensor_ != nullptr)
+        this->co2_sensor_->publish_state(NAN);
+    }
+  }
+
+  uint8_t response[8] = {0};
+  if (!this->read_co2_frame_(response)) {
     this->error_count_++;
     this->status_set_warning();
     return;
+  }
+
+  if (!this->initialized_) {
+    this->initialized_ = true;
+    this->read_firmware_version_();
+    if (this->abc_boot_logic_ != CM1106_ABC_NONE)
+      this->abc_set_(this->abc_boot_logic_ == CM1106_ABC_ENABLED);
   }
 
   const uint16_t ppm = encode_uint16(response[3], response[4]);
@@ -253,7 +253,7 @@ void CM1106ProComponent::update() {
     return;
   }
 
-  // Preheating completed (status Bit0 now 0): log the duration, reset trackers.
+  // Preheating completed according to this module's Bit0 polarity.
   if (this->preheat_start_millis_ != 0) {
     ESP_LOGI(TAG, "Preheating complete after %ums", (unsigned) (now - this->preheat_start_millis_));
     this->preheat_start_millis_ = 0;
@@ -272,20 +272,27 @@ void CM1106ProComponent::update() {
 }
 
 void CM1106ProComponent::calibrate_zero(uint16_t ppm) {
-  uint8_t pre[8] = {0};
-  uint16_t pre_ppm = 0;
-  bool have_pre = false;
-  if (this->cm1106_write_command_(C_M1106_CMD_GET_CO2, sizeof(C_M1106_CMD_GET_CO2), pre, sizeof(pre)) && pre[0] == 0x16 &&
-      pre[1] == 0x05 && pre[2] == 0x01 && pre[7] == cm1106_pro_checksum(pre, sizeof(pre))) {
-    pre_ppm = encode_uint16(pre[3], pre[4]);
-    have_pre = true;
+  if (ppm < 400 || ppm > 1500) {
+    ESP_LOGW(TAG, "Calibration skipped: target must be between 400 and 1500 ppm");
+    return;
+  }
+  if (!this->has_valid_ || millis() - this->last_valid_millis_ > STALE_THRESHOLD_MS) {
+    ESP_LOGW(TAG, "Calibration skipped: no recent valid CO2 reading");
+    return;
   }
 
-  if (have_pre) {
-    ESP_LOGI(TAG, "Manual calibration: target=%uppm, pre-reading=%uppm", ppm, pre_ppm);
-  } else {
-    ESP_LOGI(TAG, "Manual calibration: target=%uppm, pre-reading unavailable", ppm);
+  uint8_t pre[8] = {0};
+  if (!this->read_co2_frame_(pre)) {
+    ESP_LOGW(TAG, "Calibration skipped: could not read a valid CO2 frame");
+    return;
   }
+  const uint8_t status = pre[5];
+  const uint16_t pre_ppm = encode_uint16(pre[3], pre[4]);
+  if (this->is_preheating_(status) || (status & 0x0E) != 0 || pre_ppm >= RANGE_MAX_PPM) {
+    ESP_LOGW(TAG, "Calibration skipped: CO2 module is warming up, faulty, or out of range (status=%02X)", status);
+    return;
+  }
+  ESP_LOGI(TAG, "Manual calibration: target=%uppm, pre-reading=%uppm", ppm, pre_ppm);
 
   uint8_t cmd[6];
   memcpy(cmd, C_M1106_CMD_SET_CO2_CALIB, sizeof(cmd));
