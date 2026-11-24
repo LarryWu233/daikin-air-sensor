@@ -99,16 +99,81 @@ sensor:
       entity_category: diagnostic
   - platform: sgp30
     i2c_id: th_bus
+    update_interval: 1s # SGP30 dynamic baseline compensation requires one IAQ measurement per second
     compensation:
       temperature_source: temperature
       humidity_source: humidity
     eco2:
       id: eco2sensor
       internal: true
+    tvoc_baseline:
+      id: tvoc_baseline
+      internal: true
+      on_value:
+        then:
+          - lambda: id(tvoc_baseline_ready) = true;
     tvoc:
       name: "DAIKIN TVOC Sensor"
       id: tvocsensor
       unit_of_measurement: "ppb" #原始TVOC单位为ppb，不做不可靠的µg/m³换算
+      on_raw_value:
+        then:
+          - lambda: |-
+              const uint32_t now = millis();
+              const uint32_t training_ms = 12UL * 60UL * 60UL * 1000UL;
+              const uint32_t sustained_ms = 3UL * 60UL * 60UL * 1000UL;
+              const uint32_t extreme_ms = 5UL * 1000UL;
+              const uint32_t recovery_ms = 10UL * 60UL * 1000UL;
+
+              // A restored baseline normally becomes available after 1 hour. A fresh/OTA-cleared
+              // baseline falls back to the full 12-hour training period before alerts are armed.
+              if (!std::isfinite(x) || (!id(tvoc_baseline_ready) && now < training_ms)) {
+                id(tvoc_high_since) = 0;
+                id(tvoc_extreme_since) = 0;
+                id(tvoc_clear_since) = 0;
+                id(tvoc_alert_active) = false;
+                return;
+              }
+
+              float sustained_threshold = id(tvocthreshold).state;
+              if (!std::isfinite(sustained_threshold) || sustained_threshold <= 0.0f)
+                sustained_threshold = 1000.0f;
+              const float clear_threshold = sustained_threshold * 0.60f;
+
+              if (!id(tvoc_alert_active)) {
+                id(tvoc_clear_since) = 0;
+                if (x >= sustained_threshold) {
+                  if (id(tvoc_high_since) == 0) id(tvoc_high_since) = now;
+                } else {
+                  id(tvoc_high_since) = 0;
+                }
+                if (x >= 10000.0f) {
+                  if (id(tvoc_extreme_since) == 0) id(tvoc_extreme_since) = now;
+                } else {
+                  id(tvoc_extreme_since) = 0;
+                }
+
+                const bool sustained = id(tvoc_high_since) != 0 &&
+                    uint32_t(now - id(tvoc_high_since)) >= sustained_ms;
+                const bool extreme = id(tvoc_extreme_since) != 0 &&
+                    uint32_t(now - id(tvoc_extreme_since)) >= extreme_ms;
+                if (sustained || extreme) {
+                  id(tvoc_alert_active) = true;
+                  id(tvoc_clear_since) = 0;
+                }
+              } else {
+                if (x <= clear_threshold) {
+                  if (id(tvoc_clear_since) == 0) id(tvoc_clear_since) = now;
+                  if (uint32_t(now - id(tvoc_clear_since)) >= recovery_ms) {
+                    id(tvoc_alert_active) = false;
+                    id(tvoc_high_since) = 0;
+                    id(tvoc_extreme_since) = 0;
+                    id(tvoc_clear_since) = 0;
+                  }
+                } else {
+                  id(tvoc_clear_since) = 0;
+                }
+              }
       filters:
         - throttle: 15s
   - platform: hdc1080
@@ -139,6 +204,24 @@ globals:
   - id: tvoc_led_on
     type: bool
     initial_value: 'false'
+  - id: tvoc_alert_active
+    type: bool
+    initial_value: 'false'
+  - id: tvoc_baseline_ready
+    type: bool
+    initial_value: 'false'
+  - id: tvoc_flash_phase
+    type: bool
+    initial_value: 'false'
+  - id: tvoc_high_since
+    type: uint32_t
+    initial_value: '0'
+  - id: tvoc_extreme_since
+    type: uint32_t
+    initial_value: '0'
+  - id: tvoc_clear_since
+    type: uint32_t
+    initial_value: '0'
 
 switch:
   - platform: template
@@ -354,6 +437,16 @@ font:
     size: 12
     bpp: 1
     glyphs: "0123456789-.°C%RH"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_alert
+    size: 16
+    bpp: 1
+    glyphs: "TVOC HIG"
+  - file: fonts/departure-mono-11px-square.ttf
+    id: departure_alert_unit
+    size: 10
+    bpp: 1
+    glyphs: "pb"
 
 display:
   - platform: ssd1306_i2c
@@ -361,8 +454,20 @@ display:
     i2c_id: th_bus
     address: 0x3C
     rotation: 180
-    update_interval: 2s
+    update_interval: 1s
     lambda: |-
+      if (id(tvoc_alert_active)) {
+        id(tvoc_flash_phase) = !id(tvoc_flash_phase);
+        if (id(tvoc_flash_phase)) {
+          it.print(64, 3, id(departure_alert), TextAlign::TOP_CENTER, "TVOC HIGH");
+          if (id(tvocsensor).has_state() && std::isfinite(id(tvocsensor).state))
+            it.printf(64, 29, id(departure_large), TextAlign::TOP_CENTER, "%.0f", id(tvocsensor).state);
+          else
+            it.print(64, 29, id(departure_large), TextAlign::TOP_CENTER, "--");
+          it.print(64, 50, id(departure_alert_unit), TextAlign::TOP_CENTER, "ppb");
+          return;
+        }
+      }
       auto measure = [](font::Font *f, const char *text) {
         int width, offset, baseline, height;
         f->measure(text, &width, &offset, &baseline, &height);
